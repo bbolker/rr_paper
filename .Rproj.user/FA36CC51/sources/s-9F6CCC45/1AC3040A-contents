@@ -1,0 +1,133 @@
+library(glmmTMB)
+library(foreign)
+library(tidyverse)
+library(TMB)
+source("functions.R")
+
+load("Data/pirls_cat.RData")
+
+pirls <- pirls %>%
+  droplevels()
+pirls <- within(pirls, Eco_disad <- relevel(Eco_disad, ref = "0 to 10%"))
+pirls <- within(pirls, Size_lib <- relevel(Size_lib, ref = "500 Book Titles or Fewer"))
+pirls_df <- pirls %>%
+  select(Overall1, Student_ID, School, SchoolsInCountry, Country, Eco_disad, Size_lib)
+pirls_sub <- pirls_df
+pirls_sub <- pirls_df %>%
+  filter(as.numeric(Country) < 15 & as.numeric(School) < 80)
+pirls_sub$Overall <- pirls_sub$Overall1
+pirls_sub$School <- pirls_sub$SchoolsInCountry
+pirls_sub <- na.omit(pirls_sub)
+
+#### ---------------------
+#### Case 2: unstructured
+#### ---------------------
+
+fit.us <- glmmTMB(Overall ~  Eco_disad  +
+                     (Eco_disad| Country) ,
+                   data = pirls_sub,
+                   family = gaussian())
+
+object <- fit.us
+ranef(object)
+listname <- "cond"
+cnms <- object$modelInfo$reTrms[[listname]]$cnms   ## list of (named) terms and X columns
+reStruc <- object$modelInfo$reStruc[[paste0(listname, "ReStruc")]] ## random-effects structure
+flist <- object$modelInfo$reTrms[[listname]]$flist ## list of grouping variables
+levs <- lapply(flist, levels)
+
+pl <- object$obj$env$parList(object$fit$par, object$fit$parfull)
+nc <- vapply(reStruc, function(x) x$blockSize, numeric(1)) ## number of RE params per block
+nb <- vapply(reStruc, function(x) x$blockReps, numeric(1)) ## number of blocks per RE (may != nlevs in some cases)
+bc <- vapply(reStruc, function(x) x$blockCode, numeric(1)) ## code block
+block.rr <- 1
+nbseq <- rep.int(seq_along(nb), nb * nc)       ## splitting vector
+ml.b <- split(pl$b, nbseq)
+ml <- ml.b
+for (i in seq_along(ml.b)) {
+  ml[[i]] <- matrix(ml.b[[i]], ncol = nc[i], byrow = TRUE,
+                    dimnames = list(NULL, cnms[[i]]))
+}
+
+u <- as.matrix(ml[[block.rr]])
+rownames(u) <- levs$Country
+b.rr <-t(u)
+b.rr.long <- as.data.frame(b.rr) %>%
+  rownames_to_column("Coefficient") %>%
+  pivot_longer(cols = -Coefficient, names_to = c("Country"), values_to = "lu" )
+
+s1 <- TMB::sdreport(object$obj,  getJointPrecision = TRUE)
+# subset first
+h.inv <- solve(s1$jointPrecision)
+colnames(h.inv) <- rownames(h.inv) <- names(object$obj$env$last.par.best)
+h.inv.b <- h.inv[rownames(h.inv)=="b", colnames(h.inv)=="b"]
+b.cols <- split(1:ncol(h.inv.b), nbseq)
+b.cols.rr <-  b.cols[[block.rr]]
+h.inv.b.tmp <- h.inv.b[b.cols.rr, b.cols.rr]
+h.inv.u <- h.inv.b.tmp
+
+diag.H.lu <- diag(h.inv.u)
+diag.H.lu.df <- as.data.frame(diag.H.lu)
+coef.nam <- rep(cnms$Country, nb)
+nam.grp <- rep(levs$Country, each =nc)
+var.re <- cbind(coef.nam, diag.H.lu.df, nam.grp)
+
+names(var.re) <- c("Coefficient", "var.u", "Country")
+
+b.all <- b.rr.long
+ranef.rr <- left_join(b.all, var.re, by = intersect(names(b.all), names(var.re)))
+ranef.rr$u <- ranef.rr$lu
+ranef.rr$sd.u <- sqrt(ranef.rr$var.u)
+
+### how sjplot gets set
+rand.ef <- glmmTMB::ranef(object)[[1]]
+s2 <- sqrt(s1$diag.cov.random)
+rand.se <- purrr::map(rand.ef, function(.x) {
+  cnt <- nrow(.x) * ncol(.x)
+  s3 <- s2[1:cnt]
+  s2 <- s2[-(1:cnt)]
+  as.data.frame(matrix(sqrt(s3), ncol = ncol(.x), byrow = TRUE))
+})
+
+ranef.rr <- ranef.rr %>%
+  mutate(low = u - qnorm(0.975)*sqrt(sd.u),
+         high = u + qnorm(0.975)*sqrt(sd.u))
+
+load("Results/compare_rese_to_sjplot.RData")
+save.image("Results/compare_rese_to_sjplot.RData")
+## ------
+# RE plot
+## ------
+library(sjPlot)
+mod_info <- get_model_data(fit.us, type = "re", transform = NULL)
+mod_info$estimate
+sj_est <- mod_info
+sj_est$Country <- mod_info$term
+sj_est$Coefficient <- mod_info$facet
+sj_est <- select(sj_est, Country, Coefficient, estimate, conf.low, conf.high) %>%
+  mutate(Coefficient = case_when(Coefficient == "Country (Intercept)" ~ "(Intercept)",
+                                 TRUE ~ as.character(Coefficient)))
+
+
+all_re <-  left_join(sj_est, ranef.rr, by = intersect(names(sj_est), names(ranef.rr)))
+all_re <- all_re %>%
+  select(mod_info)
+library(RColorBrewer)
+ggplot(ranef.rr,
+       aes(x = as.factor(Country)  ,
+           y = u)) +
+  geom_point()+
+  geom_linerange(aes(ymin = u - 1.96*sd.u, ymax = u + 1.96*sd.u)) +
+  geom_hline(yintercept = 0, linetype  = "dashed") +
+  facet_grid(~ factor(Coefficient, levels = facet_levels, ordered = T), scales = "free") +
+  coord_flip() + theme_mine() +
+  xlab("Country")+
+  theme( axis.text = element_text( size = 12 ),
+         axis.text.y = element_text( size = 10),
+         axis.text.x = element_text( size = 8),
+         axis.title = element_text( size = 12),
+         strip.text = element_text(size = 8),
+         legend.position="none",
+         strip.text.x = element_text(size=8, angle=90, hjust = 0, vjust =0.1))+
+  scale_fill_brewer(palette = "Paired")
+

@@ -1,0 +1,38 @@
+Family: poisson  ( log )
+Formula:          abundance ~ Zone * Year + diag(Zone * Year | Species) + (1 |  
+    Station) + rr(Species + 0 | ID, d = 2)
+Data: windfarm
+
+     AIC      BIC   logLik deviance df.resid 
+  2892.9   3026.4  -1420.5   2840.9     1227 
+
+Random effects:
+
+Conditional model:
+ Groups  Name                Variance  Std.Dev.  Corr                                
+ Species (Intercept)         2.306e+00 1.519e+00                                     
+         ZoneWF              1.453e+00 1.205e+00 0.00                                
+         ZoneS               9.446e+00 3.073e+00 0.00  0.00                          
+         Year2010            1.771e+00 1.331e+00 0.00  0.00  0.00                    
+         ZoneWF:Year2010     1.993e-11 4.464e-06 0.00  0.00  0.00  0.00              
+         ZoneS:Year2010      8.955e-01 9.463e-01 0.00  0.00  0.00  0.00  0.00        
+ Station (Intercept)         2.401e-09 4.900e-05                                     
+ ID      SpeciesOxsimpa      1.919e-13 4.381e-07                                     
+         SpeciesRotsimpa     9.105e-02 3.017e-01 -1.00                               
+         SpeciesSkrubbskadda 2.316e+00 1.522e+00 -0.29  0.29                         
+         SpeciesStensnultra  5.848e-01 7.648e-01 -0.14  0.14  0.99                   
+         SpeciesTorsk        1.289e-01 3.591e-01  0.37 -0.37  0.78  0.87             
+         SpeciesTanglake     3.782e-01 6.149e-01  0.06 -0.06  0.94  0.98  0.95       
+         SpeciesAL           1.505e-01 3.880e-01 -0.69  0.69  0.90  0.82  0.42  0.69 
+Number of obs: 1253, groups:  Species, 7; Station, 108; ID, 179
+
+Conditional model:
+                Estimate Std. Error z value Pr(>|z|)  
+(Intercept)     -1.41158    0.60503  -2.333   0.0196 *
+ZoneWF          -0.26035    0.51935  -0.501   0.6162  
+ZoneS           -0.37168    1.20628  -0.308   0.7580  
+Year2010        -0.05035    0.56412  -0.089   0.9289  
+ZoneWF:Year2010  0.27164    0.26739   1.016   0.3097  
+ZoneS:Year2010   0.78687    0.54587   1.442   0.1494  
+---
+Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1

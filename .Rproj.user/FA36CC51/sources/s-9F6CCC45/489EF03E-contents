@@ -1,0 +1,69 @@
+library(glmmTMB)
+# Note: this only accounts for the uncertainty of the fixed effects
+# conditional on the estimates of the random-effect variances and BLUPs/conditional modes
+
+data(Orthodont,package="nlme")
+fm2 <- glmmTMB(distance ~ age*Sex + (age | Subject),
+               data = Orthodont,
+               family="gaussian")
+
+## make prediction data frame
+newdat <- expand.grid(age=c(8,10,12,14), Sex=c("Female","Male"))
+## design matrix (fixed effects)
+mm <- model.matrix(delete.response(terms(fm2)),newdat)
+## linear predictor (for GLMMs, back-transform this with the
+##  inverse link function (e.g. plogis() for binomial, beta;
+##  exp() for Poisson, negative binomial
+newdat$distance <- drop(mm %*% fixef(fm2)[["cond"]])
+predvar <- diag(mm %*% vcov(fm2)[["cond"]] %*% t(mm))
+newdat$SE <- sqrt(predvar)
+newdat$SE2 <- sqrt(predvar+sigma(fm2)^2)
+
+library(ggplot2);  theme_set(theme_bw())
+pd <- position_dodge(width=0.4)
+g0 <- ggplot(Orthodont,aes(x=age,y=distance,colour=Sex))+
+  stat_sum(alpha=0.2,aes(size=..n..))+
+  scale_size_continuous(breaks=1:4,range=c(2,5))
+g1 <- g0+geom_line(data=newdat,position=pd)+
+  geom_point(data=newdat,shape=17,size=3,position=pd)
+## confidence intervals
+g2 <- g1 + geom_linerange(data=newdat,
+                          aes(ymin=distance-2*SE,ymax=distance+2*SE),
+                          lwd=2, position=pd)
+## prediction intervals
+g2 + geom_linerange(data=newdat,
+                    aes(ymin=distance-2*SE2,ymax=distance+2*SE2), position=pd)
+
+
+
+###Pirls
+newdat_pirls <- pirls %>%
+  droplevels() %>%
+  select( Eco_disad, Size_lib) %>%
+  distinct()
+## design matrix (fixed effects)
+mm <- model.matrix(delete.response(terms(fit.rr)),newdat_pirls)
+## linear predictor (for GLMMs, back-transform this with the
+##  inverse link function (e.g. plogis() for binomial, beta;
+##  exp() for Poisson, negative binomial
+newdat_pirls$Overall1 <- drop(mm %*% fixef(fit.rr)[["cond"]])
+predvar <- diag(mm %*% vcov(fit.rr)[["cond"]] %*% t(mm))
+newdat_pirls$SE <- sqrt(predvar)
+newdat_pirls$SE2 <- sqrt(predvar+sigma(fit.rr)^2)
+
+
+library(ggplot2);  theme_set(theme_bw())
+pd <- position_dodge(width=0.4)
+g0 <- ggplot(pirls,aes(x=Eco_disad,y=Overall1,colour=Size_lib)) +
+  stat_sum(alpha=0.2,aes(size=..n..)) #+
+  # scale_size_continuous(breaks=1:4,range=c(2,5))
+g1 <- g0+geom_line(data=newdat_pirls,position=pd)+
+  geom_point(data=newdat_pirls,shape=17,size=3,position=pd)
+## confidence intervals
+g2 <- g1 + geom_linerange(data=newdat_pirls,
+                          aes(ymin=Overall1-2*SE,ymax=Overall1+2*SE),
+                          lwd=2, position=pd)
+## prediction intervals
+g2 + geom_linerange(data=newdat_pirls,
+                    aes(ymin=Overall1-2*SE2,ymax=Overall1+2*SE2), position=pd)
+

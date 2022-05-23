@@ -1,0 +1,95 @@
+library(glmmTMB)
+library(foreign)
+library(tidyverse)
+library(TMB)
+library(lme4)
+source("functions.R")
+load("Data/pirls_data.RData")
+
+categorical_vars <- c("Country", "School", "Class",  "Grade",  "Sex", "Lang",
+                      "Gender", "Lang_home",  "Resources_cat", "Conf_cat", "Num_books", "Num_study_sup")
+score_vars <- names(pirls_data)[which(names(pirls_data) == "Overall1"):which(names(pirls_data) =="Str_for5")]
+numeric_vars <- c("Bully", "Like_read", "Sense_schl_belong",  "Early_lit_act",
+                  "Par_like_read")
+# # make sure variables are the correct class
+pirls_data <- pirls_data %>%
+  mutate_at(categorical_vars, as.factor) %>%
+  mutate_at(score_vars, as.character ) %>%
+  mutate_at(score_vars, as.numeric ) %>%
+  mutate_at(numeric_vars, as.character ) %>%
+  mutate_at(numeric_vars, as.numeric )
+
+
+s_cat <- pirls_data %>%
+  select(Student_ID, categorical_vars) %>%
+  pivot_longer(cols = all_of(categorical_vars), names_to = "Variable", values_to  = "Level")
+
+cat_nlvls <- s_cat %>%
+  group_by(Variable) %>%
+  summarise(n = length(unique(Level)))
+cat_summary1 <- s_cat %>%
+  group_by(Variable, Level) %>%
+  summarise(n = n()) %>%
+  mutate(Level = case_when(is.na(Level) ~ "Missing",
+                           TRUE ~ as.character(Level)))
+
+cat_summ2 <- cat_summary1 %>%
+  filter(Variable %in% c("Sex", "Lang", "Gender", "Lang_home",  "Resources_cat", "Conf_cat"))
+
+scores_long <- pirls_data %>%
+  select(Student_ID, Country, Class, Overall1:Str_for5) %>%
+  pivot_longer(cols = Overall1:Str_for5, names_to = "Variable", values_to  = "Score")
+
+scores_sum <- scores_long %>%
+  group_by(Country, Variable) %>%
+  summarise(mean = round(mean(Score, na.rm =T),1),
+            sd = round(sd(Score, na.rm = T),1)) %>%
+  ungroup()
+
+scores_overall1 <- scores_sum %>%
+  filter(Variable == "Overall1")
+
+ggplot(pirls_data, aes(x = Conf_cat, y = Overall1)) +
+  geom_boxplot() +
+  facet_wrap(~Country) +
+  theme_minimal() + theme(legend.position = "none") +
+  theme(axis.text.x=element_text(angle=90, size = 8, hjust = 1, vjust=0) )
+
+num_books_lab <- c("0–10 books",  "11–25 books", "26–100 books",
+                   "101–200 books", "more than 200")
+ggplot(pirls_data, aes(x = Num_books, y = Overall1)) +
+  geom_boxplot() +
+  facet_wrap(~Country) +
+  theme_minimal() + theme(legend.position = "none") +
+  theme(axis.text.x=element_text(angle=90, size = 8, hjust = 1, vjust=0) )+
+  scale_x_discrete(labels=num_books_lab)
+
+num_study_lab <- c("Neither", "Either", "Both")
+ggplot(pirls_data, aes(x = Num_study_sup, y = Overall1)) +
+  geom_boxplot() +
+  facet_wrap(~Country) +
+  theme_minimal() + theme(legend.position = "none") +
+  theme(axis.text.x=element_text(angle=90, size = 8, hjust = 1, vjust=0) )+
+  scale_x_discrete(labels=num_study_lab)
+
+ggplot(pirls_data, aes(x = Num_books_par, y = Overall1)) +
+  geom_boxplot() +
+  facet_wrap(~Country) +
+  theme_minimal() + theme(legend.position = "none") +
+  theme(axis.text.x=element_text(angle=90, size = 8, hjust = 1, vjust=0) )
+
+par_edu_lab <-c("University",
+                "Post-secondary", "Upper Secondary", "Lower Secondary",
+                "No School", "Not Applicable")
+ggplot(pirls_data, aes(x = Par_edu, y = Overall1)) +
+  geom_boxplot() +
+  facet_wrap(~Country) +
+  theme_minimal() + theme(legend.position = "none") +
+  theme(axis.text.x=element_text(angle=90, size = 8, hjust = 1, vjust=0) )+
+  scale_x_discrete(labels=par_edu_lab)
+
+ggplot(pirls_data, aes(x = Par_occup, y = Overall1)) +
+  geom_boxplot() +
+  facet_wrap(~Country, scales = "free_y") +
+  theme_minimal() + theme(legend.position = "none") +
+  theme(axis.text.x=element_text(angle=90, size = 8, hjust = 1, vjust=0) )

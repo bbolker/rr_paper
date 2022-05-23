@@ -1,0 +1,308 @@
+library(glmmTMB)
+library(foreign)
+library(tidyverse)
+library(TMB)
+source("functions.R")
+
+load("Data/pirls_cat.RData")
+
+level_key <- c("Urban–Densely populated" = "Urban",
+               "Suburban–On fringe or outskirts of urban area" = "Suburban",
+               "Medium size city or large town" = "Large town",
+               "Small town or village" = "Small town",
+               "Remote rural" = "Rural")
+pirls$Sch_loc <-plyr::revalue(pirls$Sch_loc, level_key)
+pirls <- pirls %>%
+  droplevels()
+pirls <- within(pirls, Eco_disad <- relevel(Eco_disad, ref = "0 to 10%"))
+pirls <- within(pirls, Size_lib <- relevel(Size_lib, ref = "500 Book Titles or Fewer"))
+pirls_df <- pirls %>%
+  select(Overall1, Student_ID, School, SchoolsInCountry, Country, Eco_disad, Size_lib) # Books, Inst_aff_res_short, Sch_emp_suc_num, Sch_discipline,
+pirls_NAomit <- na.omit(pirls_df)
+###----- Interaction: School location and eco disadvantage
+
+pirls <- pirls_NAomit
+pirls$Overall <- pirls$Overall1
+pirls$School <- pirls$SchoolsInCountry
+formula <- as.formula(Overall ~  Size_lib*Eco_disad +
+                        (1 | School) +
+                        rr(Size_lib*Eco_disad | Country, 2) +
+                             diag(Size_lib*Eco_disad | Country) )
+rr.fit <- glmmTMB(formula,
+                  data = pirls,
+                  family = gaussian(),
+                  control = glmmTMBControl(start_method = list(method = "res") ))
+
+# load("pirls_rr_fit_PhD_conference21.RData")
+# save.image(file = "pirls_rr_fit_PhD_conference21.RData")
+
+## ------
+# RE plot
+## ------
+library(sjPlot)
+mod_info <- get_model_data(rr.fit, type = "re", transform = NULL)[[2]]
+#To extract only the diagonal re
+ranef.rr <- ranef(rr.fit)
+var.names <- names(ranef.rr[1]$cond$Country)
+pos.re <- which(var.names=="(Intercept)")
+nvars.in1re <- pos.re[2]-1
+nc <- length(unique(mod_info$term))
+nre.in1re <- nvars.in1re*nc
+
+facet_levels <- c("(Intercept)",
+                  "Size_lib501-5,000 Book Titles",
+                  "Size_libMore than 5,000 Book Titles",
+                  "Eco_disad11 to 25%",
+                  "Size_lib501-5,000 Book Titles:Eco_disad11 to 25%",
+                  "Size_libMore than 5,000 Book Titles:Eco_disad11 to 25%",
+                  "Eco_disad26 to 50%",
+                  "Size_lib501-5,000 Book Titles:Eco_disad26 to 50%",
+                  "Size_libMore than 5,000 Book Titles:Eco_disad26 to 50%",
+                  "Eco_disadMore than 50%",
+                  "Size_lib501-5,000 Book Titles:Eco_disadMore than 50%",
+                  "Size_libMore than 5,000 Book Titles:Eco_disadMore than 50%"
+)
+library(RColorBrewer)
+diag.re.est <- mod_info[(nre.in1re + 1):nrow(mod_info),] %>% droplevels()
+
+
+ggplot(diag.re.est,
+       aes(x = as.factor(term)  ,
+           y = estimate,
+           colour = group, fill = group)) +
+  geom_point()+
+  geom_linerange(aes(ymin = conf.low, ymax = conf.high)) +
+  geom_hline(yintercept = 0, linetype  = "dashed") +
+  facet_grid(~ factor(facet, levels = facet_levels, ordered = T), scales = "free") +
+  coord_flip() + theme_mine() +
+  xlab("Country")+
+  theme( axis.text = element_text( size = 12 ),
+         axis.text.y = element_text( size = 10),
+         axis.text.x = element_text( size = 8),
+         axis.title = element_text( size = 12),
+         strip.text = element_text(size = 8),
+         legend.position="none",
+         strip.text.x = element_text(size=8, angle=90, hjust = 0, vjust =0.1))+
+  scale_fill_brewer(palette = "Paired")
+
+## ------
+
+pirls_pred <- pirls %>%
+  select( Country, Eco_disad, Size_lib, School) %>%
+  distinct()
+pirls_pred$School <- NA
+pred1 <- predict(rr.fit, newdata = pirls_pred, allow.new.levels = T)
+predNA <- predict(rr.fit, newdata = pirls_pred, re.form = ~ Country)
+pirls_pred$pred_yc <- pred1
+pirls_pred$pred_ypop <- predNA
+
+
+pirls_pred$Eco_Lib <- with(pirls_pred, interaction(Eco_disad,  Size_lib ))
+levels_eco_lib <- c("0 to 10%.500 Book Titles or Fewer","0 to 10%.501-5,000 Book Titles",
+                    "0 to 10%.More than 5,000 Book Titles",
+                    "11 to 25%.500 Book Titles or Fewer",  "11 to 25%.501-5,000 Book Titles",
+                    "11 to 25%.More than 5,000 Book Titles",
+                    "26 to 50%.500 Book Titles or Fewer", "26 to 50%.501-5,000 Book Titles",
+                    "26 to 50%.More than 5,000 Book Titles",
+                    "More than 50%.500 Book Titles or Fewer",  "More than 50%.501-5,000 Book Titles",
+                    "More than 50%.More than 5,000 Book Titles")
+pirls_pred$Eco_lib2 <- factor(pirls_pred$Eco_Lib, levels = levels_eco_lib, ordered = T )
+
+
+book_labels <- c("< 500", "501-5,000" , "> 5,000" )
+pirls_pred <- pirls_pred %>%
+  arrange(Eco_lib2, Country)
+
+library(RColorBrewer)
+library(grid)
+nb.cols <- 25
+mycolors <- colorRampPalette(brewer.pal(8, "Paired"))(nb.cols)
+p <- ggplot(pirls_pred,
+       aes(x=Eco_lib2, y=pred_yc,
+           group=Country,
+           color=Country,
+           label = Eco_disad)) +
+  geom_line()+ theme_mine() +
+  ylab("Literacy score") +
+  scale_x_discrete(labels = rep(book_labels, 4))+
+scale_color_manual(values = mycolors) +
+  xlab("              0-10%            11 to 25%          26 to 50%          More than 50%      ")+
+  theme(axis.text.x = element_text(size=8, angle=30, hjust = 1, vjust =0.9),
+        axis.text = element_text( size = 8 ))
+
+
+
+country_levels <- levels(pirls_pred$Country)
+country1 <- "Buenos Aires, Argentina"
+country2 <- "Georgia"
+col_country <- mycolors[c(which(country_levels == country1), which(country_levels == country2))]
+ggplot(filter( pirls_pred, Country == country1 | Country ==country2 ),
+# ggplot(filter( pirls_pred, Country == country1  ),
+       aes(x=Eco_disad, y=pred_yc,
+           group=Size_lib,
+           color=Size_lib #,
+           # label = Eco_disad
+           )) +
+  geom_line()+ theme_mine() +
+  ylab("Literacy score")  +
+  # scale_color_manual(values = col_country) +
+  # scale_x_discrete(labels = rep(book_labels, 4))+
+  xlab("Economic disadvantage")+
+  theme(axis.text.x = element_text(size=8, angle=30, hjust = 1, vjust =0.9),
+        axis.text = element_text( size = 8 ),
+        legend.position= c(0.9, 0.8)) +
+  facet_grid(~ Country) +
+  scale_colour_discrete("Library Size")+
+  theme(legend.title = element_text(size = 10),
+        legend.text = element_text(size = 8))
+
+
+
+  labs(fill = "Library Size")
+
+
+ggplot(filter( diag.re.est, term == country1 | term ==country2 ),
+       aes(x = as.factor(term)  ,
+           y = estimate,
+           colour = group, fill = group)) +
+  geom_point()+
+  geom_linerange(aes(ymin = conf.low, ymax = conf.high)) +
+  geom_hline(yintercept = 0, linetype  = "dashed") +
+  facet_grid(~ factor(facet, levels = facet_levels), scales = "free") +
+  coord_flip() + theme_mine() +
+  xlab("Country")+
+  theme( axis.text = element_text( size = 12 ),
+         axis.text.y = element_text( size = 10),
+         axis.text.x = element_text( size = 8),
+         axis.title = element_text( size = 12),
+         strip.text = element_text(size = 8),
+         legend.position="none",
+         strip.text.x = element_text(size=8, angle=90, hjust = 0, vjust =0.1))+
+  scale_fill_brewer(palette = "Paired")
+
+## ---- theme
+# Create a simplified ggplot theme
+## ----
+fig <- theme_bw() +
+  theme(panel.grid.minor=element_blank(),
+        panel.grid.major=element_blank(),
+        panel.background=element_blank()) +
+  theme(strip.background=element_blank(),
+        strip.text.y = element_text()) +
+  theme(legend.background=element_blank()) +
+  theme(legend.key=element_blank()) +
+  theme(panel.border = element_rect(colour="black", fill=NA))
+## ----
+plot <- ggplot(aes(interaction(Eco_disad, Size_lib), Overall1,  colour = Country),
+               data = filter(pirls, Eco_disad == "11 to 25%") ) +
+  geom_point() +
+  xlab("") +
+  ylab("Overall reading score") + fig
+
+
+newdat_p <- ggplot_build(plot)$data[[1]]
+
+coeffs_rr <- coef(rr.fit)
+c.coef <- coeffs_rr$cond$Country
+
+c.coef_sub <- c.coef %>%
+  select("(Intercept)", contains("Eco_disad11 to 25%") )
+
+c.coef.long <- c.coef %>%
+  gather(key = var, value = coef)
+Plot_ByCountry <- plot +
+  geom_jitter(aes(colour = factor(Country)), size = 4) +
+  xlab("Instruction affected by resource shortage") +
+  ylab("Overall reading score") + fig
+# Add regression lines for each country
+country_coefs <- coeffs_rr$cond$Country %>%
+  rename(Intercept = '(Intercept)') %>%
+  rownames_to_column("Country")
+
+plot <- ggplot(c.coef.long, aes(var, coef)) +
+  geom_point()
+
+
+
+
+
+  geom_abline(data = country_coefs,
+              aes(intercept = Intercept,
+                  slope     = Inst_aff_res_short + `Eco_disad0 to 10%` + `Size_lib501-5,000 Book Titles` + `Size_lib501-5,000 Book Titles:Eco_disad0 to 10%`,
+                  # slope     = Inst_aff_res_short + `Eco_disadMore than 50%`,
+                  col = Country))
+
+#Random code
+
+#### Other plotting
+names(coef(rr.fit)$cond$Country)
+# see group coefficients
+model_coefs <- coef(rr.fit)$cond$Country %>%
+  rename(Intercept = '(Intercept)') %>%
+  rownames_to_column("Country")
+
+names(model_coefs)[!(names(model_coefs) %in% c("Country", "Intercept"))] <- paste0("slope_", names(model_coefs)[!(names(model_coefs) %in% c("Country", "Intercept"))] )
+
+# see coefficients
+model_coefs
+
+pirls_ran <- left_join(pirls_NAomit, model_coefs, by = "Country")
+
+model_coef_plot <- ggplot(data = pirls_ran,
+                          mapping = aes(x = Inst_aff_res_short,
+                                        y = Overall1,
+                                        colour = Country)
+) +
+  geom_point(na.rm = T, alpha = 0.5) +
+  geom_abline(aes(intercept = Intercept,
+                  slope = `slope_Eco_disadMore than 50%`,
+                  colour = Country
+  ),
+  size = 1.5
+  )
+
+# see the plot
+model_coef_plot
+
+library(sjPlot)
+# plot_model(rr.fit,type="pred",
+#            terms=c("Inst_aff_res_short","Country"),pred.type="re")
+# plot_model(rr.fit, type = "est", transform = NULL)
+# plot_model(rr.fit, type = "re", transform = NULL)
+#
+# p <- plot_model(rr.fit, type = "pred",
+#            terms = c("Inst_aff_res_short", "Country"))
+#
+#
+# df <- as.data.frame(p$data)
+# df
+# ggplot2::ggplot(df, aes(x = x)) +
+#   geom_line(aes(y = predicted)) +
+#   facet_wrap(~ group)
+  # geom_ribbon(aes(ymin = conf.low, ymax = conf.high), fill = "grey70") +
+
+library(sjPlot)
+library(ggplot2)
+mod_info <- get_model_data(rr.fit, type = "pred",pred.type="re")
+ggplot(mod_info, aes(x = as.factor(term),
+                     y = estimate, colour = group, fill = group)) +
+  geom_point()+
+  geom_linerange(aes(ymin = conf.low, ymax = conf.high)) +
+  geom_hline(yintercept = 0, linetype  = "dashed") +
+  facet_grid(~ facet, scales = "free") +
+  coord_flip() + theme_mine() +
+  xlab("Species")+
+  theme( axis.text = element_text( size = 12 ),
+         axis.text.y = element_text( size = 10),
+         axis.text.x = element_text( size = 8),
+         axis.title = element_text( size = 12),
+         strip.text = element_text(size = 8),
+         legend.position="none",
+         strip.text.x = element_text(size=8, angle=90, hjust = 0))
+
+
+mean <- 1.3
+x <- c(0, 1, 3,7)
+prob <- c(0.5, 0.3, 0.1, 0.1)
+var <- sum((x - mean)^2 * prob)
+sqrt(var)

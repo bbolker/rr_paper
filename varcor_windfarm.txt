@@ -1,0 +1,16 @@
+Conditional model:
+ Groups  Name                Std.Dev.   Corr                                      
+ Species (Intercept)         1.5186e+00                                           
+         ZoneWF              1.2052e+00 0.000                                     
+         ZoneS               3.0734e+00 0.000  0.000                              
+         Year2010            1.3310e+00 0.000  0.000  0.000                       
+         ZoneWF:Year2010     4.4645e-06 0.000  0.000  0.000  0.000                
+         ZoneS:Year2010      9.4628e-01 0.000  0.000  0.000  0.000  0.000         
+ Station (Intercept)         4.9004e-05                                           
+ ID      SpeciesOxsimpa      4.3810e-07                                           
+         SpeciesRotsimpa     3.0174e-01 -1.000                                    
+         SpeciesSkrubbskadda 1.5219e+00 -0.294  0.294                             
+         SpeciesStensnultra  7.6475e-01 -0.144  0.144  0.988                      
+         SpeciesTorsk        3.5907e-01  0.367 -0.367  0.781  0.868               
+         SpeciesTanglake     6.1494e-01  0.056 -0.056  0.938  0.980  0.949        
+         SpeciesAL           3.8799e-01 -0.687  0.687  0.896  0.818  0.423  0.687 

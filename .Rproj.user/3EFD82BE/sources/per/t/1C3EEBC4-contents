@@ -1,0 +1,240 @@
+library(glmmTMB)
+library(foreign)
+library(tidyverse)
+library(TMB)
+library(RColorBrewer)
+library(grid)
+library(directlabels)
+library(ggrepel)
+source("functions.R")
+set.seed(101)
+load("Data/pirls_cat.RData")
+
+pirls <- pirls %>%
+  droplevels()
+pirls <- within(pirls, Eco_disad <- relevel(Eco_disad, ref = "0 to 10%"))
+pirls <- within(pirls, Size_lib <- relevel(Size_lib, ref = "500 Book Titles or Fewer"))
+pirls_df <- pirls %>%
+  select(Overall1, Student_ID, School, SchoolsInCountry, Country, Eco_disad, Size_lib)
+###----- Interaction: School location and eco disadvantage
+pirls <- pirls_df
+pirls$Overall <- pirls$Overall1
+pirls$School <- pirls$SchoolsInCountry
+
+nlv <- 1:4
+fit_list <- lapply(nlv,
+                   function(d) {
+                     fit.rr <- glmmTMB(Overall ~  Size_lib*Eco_disad +
+                                         (1 |School) +
+                                         rr(Size_lib*Eco_disad | Country, d),
+                                       data = pirls,
+                                       family = gaussian(),
+                                       control = glmmTMBControl(start_method = list(method = "res")))
+                   })
+
+aic_vec <- sapply(fit_list, AIC)
+rank <- nlv[ which(aic_vec - min(aic_vec, na.rm = TRUE)==0) ]
+
+fit.rr <- glmmTMB(Overall ~  Size_lib*Eco_disad +
+                    (1 |School) +
+                    rr(Size_lib*Eco_disad | Country, rank),
+                  data = pirls,
+                  family = gaussian(),
+                  control = glmmTMBControl(optCtrl=list(iter.max=1e5,eval.max=1e3),
+                                           start_method = list(method = "res")))
+# save.image("Results/pirls_rr_eco_lib.RData")
+load(("Results/pirls_rr_eco_lib.RData"))
+
+## ------
+### Prediction plot of interaction
+### Don't include
+## ------
+level_sum <- pirls %>%
+  group_by(Country, Eco_disad,Size_lib) %>%
+  summarise(n = n()) %>%
+  group_by(Country,Size_lib) %>%
+  mutate(n_sl = sum(n)) %>%
+  group_by(Country, Eco_disad) %>%
+  mutate(n_eco = sum(n))
+
+geor_sum <- level_sum[level_sum$Country == "Georgia",]
+pirls_pred[pirls_pred$Country == "Georgia",]
+
+pirls_pred <- pirls %>%
+  select(Country, Eco_disad, Size_lib) %>%
+  distinct() %>%
+  mutate(School = NA)
+
+pred1 <- predict(fit.rr, newdata = pirls_pred, allow.new.levels = T)
+pirls_pred$pred_yc <- pred1
+
+### include se of beta and rr
+sd.error.pred <- ranef.rr.int %>%
+  select(Coefficient, Country, beta, sd_beta, u, sd.u) %>%
+  mutate(sd_bu = sd_beta + sd.u,
+         Eco_disad = gsub("Size_lib", "", Coefficient),
+         Size_lib = Eco_disad)
+sl_lev <- levels(pirls_pred$Size_lib)
+Ed_lev <- levels(pirls_pred$Eco_disad)
+
+sd.error.pred$Eco_disad <- sd.error.pred$Size_lib <- gsub("Eco_disad", "", sd.error.pred$Size_lib)
+ beta_names<- unique(sd.error.pred$Eco_disad)
+eco_disad_beta <- c(rep(Ed_lev[1], 4), Ed_lev[2:4], rep(Ed_lev[2:4], each = 3))
+size_lib_beta <- c(sl_lev, rep(sl_lev[1], 3), rep(sl_lev[2:4],  3))
+##Check if they match
+beta_check <- data.frame(cbind(beta_names, eco_disad_beta, size_lib_beta))
+sd.error.pred$Eco_disad <- mapvalues(sd.error.pred$Eco_disad, from = beta_names, to = eco_disad_beta)
+sd.error.pred$Size_lib <- mapvalues(sd.error.pred$Size_lib, from = beta_names, to = size_lib_beta)
+
+pirls_pred <- left_join(pirls_pred, sd.error.pred, by = c("Eco_disad", "Size_lib", "Country"))
+
+size_lib_levels <- c("No School Library", "500 Book Titles or Fewer", "501-5,000 Book Titles", "More than 5,000 Book Titles" )
+size_lib_labels <- c("No School Library", "Less than 500 Books", "501-5,000 Books", "More than 5,000 Books" )
+
+# pirls_pred$Size_lib <- mapvalues(pirls_pred$Size_lib, from = size_lib_levels, to = size_lib_labels)
+pirls_pred <- pirls_pred %>%
+  mutate(Size_lib = factor(Size_lib, levels = size_lib_labels, ordered = T)) %>%
+  arrange(Country, Eco_disad, Size_lib)
+
+country_levels <- levels(pirls_pred$Country)
+## ----------------------------------
+## Plot of 2 countries only
+## ----------------------------------
+country1 <- "Bulgaria"
+country2 <- "Georgia"
+
+col_country <- mycolors[c(which(country_levels == country1), which(country_levels == country2))]
+pirls_pred_tmp <- pirls_pred %>%
+  distinct()
+pirls_colours <- pirls_pred_tmp %>%
+  filter( (Country == country1 | Country == country2) & !is.na(pred_yc)) %>%
+  mutate(label = interaction(Country,Size_lib,sep="-",lex.order=TRUE),
+         LCL = pred_yc - 1.96*sd_bu,
+         UCL = pred_yc + 1.96*sd_bu) %>%
+  droplevels()
+
+## Red and Green
+colours1  <- scales::seq_gradient_pal(low = "#33CCFF", high = "#000099", space = "Lab")(1:4/4)
+colours2  <- scales::seq_gradient_pal(low = "#14E44D", high = "#0A7527", space = "Lab")(1:4/4)
+# create values for scale colour manual
+values <- setNames(c(colours1, colours2), levels(with(pirls_colours, interaction(Country,Size_lib,sep="-",lex.order=TRUE))))
+
+plot.int <- ggplot(filter(pirls_pred_tmp,  !is.na(pred_yc)),
+       aes(x=Eco_disad, y=pred_yc,
+           group = interaction(Size_lib, Country),
+           linetype=Size_lib)) +
+  geom_line(alpha=0.05) +
+  geom_line(data=pirls_colours,
+             aes(x = Eco_disad,y = pred_yc,
+                 colour = label,
+                 linetype=Size_lib),  size = 1) +
+  geom_ribbon(data= pirls_colours,
+                 aes(ymin=LCL, ymax=UCL, x = Eco_disad, fill = label),
+                alpha = 0.1) +
+  theme_mine() +
+  ylab("Literacy score")  +
+  xlab("Economic disadvantage") +
+  scale_x_discrete( ) +
+  coord_cartesian(clip = 'off') +
+  scale_colour_manual(values = values)+
+  scale_fill_manual(values=values, name="fill") +
+  scale_linetype_manual(values=c("dotted", "dotdash",  "dashed", "solid"), name = "Library Size") + # Change linetypes
+  theme(axis.text.x = element_text(size= 10, angle=0, hjust = 0.4, vjust =0),
+                  axis.text.y = element_text(size= 10),
+                  axis.text = element_text( size = 10 ),
+        axis.title.x = element_text(margin = unit(c(5, 0, 0, 0), "mm")),
+        axis.title.y = element_text(margin = unit(c(0, 5,0 , 0), "mm")),
+        plot.margin=unit(c(1,5,1.5,1.2),"cm"),
+                  legend.position= "none")  +
+  scale_y_continuous(limits=c(420,600), breaks=seq(410,600,30))+
+  guides(colour="none") +
+  geom_label_repel(data = filter(pirls_colours, Eco_disad == "More than 50%"),
+                   aes(label = label , colour = label),
+                   nudge_x = 3, nudge_y = 2,
+                   force = 0.5, label.size=NA, #remove box
+                   direction = "y", force_pull = 0,
+                   xlim = c(4,5.2), na.rm = TRUE)
+
+plot.int
+
+## ----------------------------------
+### Save plot of individual countries
+## ----------------------------------
+for(plot.country in country_levels){
+  plot_country <- ggplot(filter(pirls_pred_tmp,  !is.na(pred_yc) & Country == plot.country),
+         aes(x=Eco_disad, y=pred_yc,
+             colour = Size_lib,
+             group=Size_lib,
+             linetype=Size_lib)) +
+    geom_line() +
+    facet_wrap(~ Country) +
+    theme_classic() +
+    ylab("Literacy score")  +
+    xlab("Economic disadvantage") +
+    scale_x_discrete( ) +
+    coord_cartesian(clip = 'off') +
+    scale_linetype_manual(values=c("dotted", "dotdash",  "dashed", "solid"), name = "Library Size")
+
+  ggsave(filename = paste0("Plots/pirls_by_country/plot_",plot.country,".png"), device = "png", plot  = plot_country)
+}
+
+
+
+## ----------------------------------
+## ----------------------------------
+### Plot of rr conditional estimates with country 1 and 2 coloured
+## ----------------------------------
+## ----------------------------------
+
+ranef.rr <- left_join(b.all, var.re, by = intersect(names(b.all), names(var.re)))
+ranef.rr$u <- ranef.rr$lu
+ranef.rr$sd.u <- sqrt(ranef.rr$var.u)
+
+coef_levels <- unique(ranef.rr$Coefficient)
+coef_labels <- c("(Intercept)", "More than 5,000 Books", "501-5,000 Books",  "No Library",
+                 "11 to 25%", "26 to 50%",  "More than 50%", "More than 5,000 Books: 11 to 25%",
+                 "501-5,000 Books: 11 to 25%", "No Library: 11 to 25%", "More than 5,000 Books: 26 to 50%",
+                 "501-5,000 Books: 26 to 50%", "No Library: 26 to 50%", "More than 5,000 Books: More than 50%",
+                 "501-5,000 Books: More than 50%", "No Library: More than 50%")
+
+library(plyr)
+ranef.rr$Coefficient <- mapvalues(ranef.rr$Coefficient, from = coef_levels, to = coef_labels)
+coef_order <- c("(Intercept)", "No Library",  "501-5,000 Books", "More than 5,000 Books",
+                "11 to 25%", "26 to 50%",  "More than 50%", "No Library: 11 to 25%", "No Library: 26 to 50%", "No Library: More than 50%",
+                "501-5,000 Books: 11 to 25%", "501-5,000 Books: 26 to 50%", "501-5,000 Books: More than 50%",
+                "More than 5,000 Books: 11 to 25%", "More than 5,000 Books: 26 to 50%", "More than 5,000 Books: More than 50%")
+
+ranef.rr <- ranef.rr %>%
+  mutate(Coefficient = factor(Coefficient, levels = coef_order, ordered = T),
+         Country = factor(Country, levels = sort(unique(ranef.rr$Country)), ordered = T))
+coef_plot_labels <- c("(Intercept)", "No Library",  "501-5,000 Books", "More than 5,000 Books", "11 to 25%", "26 to 50%",  "More than 50%",
+                      "No Library: \n 11 to 25%", "No Library: \n 26 to 50%", "No Library: \n More than 50%",
+                      "501-5,000 Books: \n 11 to 25%", "501-5,000 Books: \n 26 to 50%", "501-5,000 Books: \n More than 50%",
+                      "More than 5,000 Books: \n 11 to 25%", "More than 5,000 Books: \n 26 to 50%", "More than 5,000 Books: \n More than 50%")
+
+ranef.rr <- ranef.rr %>%
+  mutate(Coefficient = mapvalues(Coefficient, from = coef_order, to = coef_plot_labels),
+         highlight_c = case_when(Country == country1 ~ "colour 1",
+                                  Country == country2 ~ "colour 2",
+                                  TRUE ~ "colour"),
+         highlight_c = factor(highlight_c, ordered = T))
+
+ggplot(ranef.rr,
+       aes(x = reorder(Country, desc(Country))  ,
+           y = u,
+           colour = (highlight_c))) +
+  geom_point()+
+  geom_linerange(aes(ymin = u - 1.96*sd.u, ymax = u + 1.96*sd.u)) +
+  geom_hline(yintercept = 0, linetype  = "dashed") +
+  facet_grid(~ factor(Coefficient, ordered = T), scales = "free") +
+  coord_flip() + theme_mine() +
+  xlab("Country")+
+  ylab("Estimate") +
+  theme( axis.text.y = element_text( size = 10),
+         axis.text.x = element_text( size = 9),
+         axis.title = element_text( size = 12),
+         strip.text = element_text(size = 12),
+         legend.position="none",
+         strip.text.x = element_text(size=10, angle=90, hjust = 0, vjust =0.5))+
+  scale_color_manual(values  = c("#000000", "#0033FF", "#0A7527" ))+
+  scale_fill_brewer(palette = "Paired")
