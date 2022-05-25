@@ -115,7 +115,7 @@ diag.plot.data <- diag.plot.data %>%
   mutate(conf.low = b - 1.96*sd.b,
          conf.high =  b + 1.96*sd.b,
          not.zero = ifelse(conf.high < 0 | conf.low > 0, 1, 0),
-    highlight = ifelse(Coefficient %in% c("ZoneN:Year2010", "ZoneS:Year2010") &  not.zero, 1, 0 ) )
+         highlight = ifelse(Coefficient %in% c("ZoneN:Year2010", "ZoneS:Year2010") &  not.zero, 1, 0 ) )
 cols <- c("1" = "red", "0" = "black")
 
 coef_labs <- gsub("Zone", "", unique(diag.plot.data$Coefficient ))
@@ -124,13 +124,11 @@ coef_labs <- gsub("Year", "", coef_labs)
 plot.wf.diag <- diag.plot.data %>%
   mutate(Coefficient = factor(Coefficient, levels = unique(Coefficient), labels = coef_labs)) %>%
   filter(Coefficient %in% c("N:2010", "S:2010")) %>%
-  ggplot(aes(x = Coefficient, y = b,
-             colour = as.factor(highlight),
-             fill = as.factor(highlight))) +
+  ggplot(aes(x = Coefficient, y = b, colour = as.factor(highlight), fill = as.factor(highlight))) +
   geom_point()+
   geom_linerange(aes(ymin = conf.low, ymax = conf.high)) +
   geom_hline(yintercept = 0, linetype  = "dashed") +
-  facet_grid(~ factor(Species) , scales = "free") +
+  facet_grid(~ factor(Species, levels = spp_order) , scales = "free") +
   xlab("Coefficient") + ylab("Estimate") +
   theme_mine() +
   theme(legend.position="none",
@@ -224,3 +222,4 @@ sum(diag(wf.ll))
 var.explained <- (sum(diag(unc.wf.ll))-sum(diag(wf.ll)))/sum(diag(unc.wf.ll))
 
 # save.image("Results/wf_full_results_May.RData")
+load("Results/wf_full_results_May.RData")
