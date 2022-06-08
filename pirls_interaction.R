@@ -52,69 +52,71 @@ load(("Results/pirls_220521.RData"))
 ## Plot of rr estimates
 ## -------------------------------
 ## -------------------------------
-## Get estimates of the factor loadings
-object = fit.rr
-block.rr = 2
-cnms <- object$modelInfo$reTrms[["cond"]]$cnms   ## list of (named) terms and X columns
+object <- fit.rr
+### names for random effect terms, e.g. (x | group)
+cnms <- object$modelInfo$reTrms[["cond"]]$cnms   ## list of terms, i.e. names of x
 flist <- object$modelInfo$reTrms[["cond"]]$flist ## list of grouping variables
-levs <- lapply(flist, levels)
+levs <- lapply(flist, levels) # levels of group
+# (nb is the number of levels in group)
+nb <- vapply(object$modelInfo$reStruc$condReStruc, function(x) x$blockReps, numeric(1)) ## number of blocks per RE (may != nlevs in some cases)
 
-fl = object$obj$env$report(object$fit$parfull)$fact_load[[block.rr]]
-rownames(fl) = cnms$Country ### CHANGE
-
-## The variables for the reduced-rank block, b.rr = lambda * u where U ~ N(0, 1)
-bs = ranef(fit.rr)
-u = as.matrix(bs$cond[[block.rr]][,1:ncol(fl)])
-b.rr = fl %*% t(u)
-b.rr.long = as.data.frame(b.rr) %>%
+## Note: b is the name for all latent variables in the model, i.e., all random effects in the model
+## u.rr will refer to the latent variables of rr block
+## Then the estimates of the rr random effect are b.rr = lambda * u.rr
+## lambda is a (nc x d) matrix of factor loadings (nc is the number of levels in x, i.e. school vars)
+## where U ~ N(0, 1) and u.rr is (nb x d) matrix
+block.rr <- 2
+fl <- object$obj$env$report(object$fit$parfull)$fact_load[[block.rr]]
+rownames(fl) = cnms[[block.rr]]
+u.rr <- ranef(fit.rr)$cond[[block.rr]][,1:ncol(fl)]
+b.rr <- fl %*% t(u.rr)
+b.rr.long <- as.data.frame(b.rr) %>%
   rownames_to_column("Coefficient") %>%
   pivot_longer(cols = -Coefficient, names_to = c("Country"), values_to = "lu" )
 
-## Get standard deviations of params - Square root of the diagonal in the variance-covariance matrix.
-s1 = TMB::sdreport(object$obj,  getJointPrecision = TRUE)
-## subset b's first
-s1.b = s1$jointPrecision[rownames(s1$jointPrecision)=="b", colnames(s1$jointPrecision)=="b"]
-h.b.inv = solve(s1.b)
-bseq = split.bseq(object)
-b.cols = split(1:ncol(h.b.inv), bseq) ### provides split of bs by random effect
-b.cols.rr =  b.cols[[block.rr]]
-h.b.inv.tmp = h.b.inv[b.cols.rr, b.cols.rr]
-## CHANGE!!! Will need to change how to get these
-b0 = which( bs$cond[[block.rr]] == 0 )
-h.b.rr.inv = h.b.inv.tmp[-b0, -b0]
+## Get standard deviations of params - Square root of the diagonal of the hessian matrix.
+s1 <- TMB::sdreport(object$obj,  getJointPrecision = TRUE)
+## s1 has all params (beta, theta etc), but we only want b
+s1.b <- s1$jointPrecision[rownames(s1$jointPrecision)=="b", colnames(s1$jointPrecision)=="b"]
+h.b.inv <- solve(s1.b) # inverse matrix of all bs
+bseq <- split.bseq(object) ### provides split of bs by random effect
+b.cols <- split( 1:ncol(h.b.inv), bseq) # column numbers split by random effects
+h.inv.block.rr <- h.b.inv[b.cols[[block.rr]], b.cols[[block.rr]]] ## us for rr block
+### u.rr has (nb x d) estimates so only need (nb x d) X (nb x d) matrix (the remaining are set to zero)
+u.rr.dim <-  nrow(u.rr) * ncol(fl)
+h.inv.u.rr <- h.inv.block.rr[1:u.rr.dim, 1:u.rr.dim]
 
 ## Get standard errors of the estimates of lambda * u by
 ## Var[Lu] = L u L' where L is matrix of lambdas i.e., factor loadings (fixed)
-## Create L matrix
-I = diag(rep(1, ncol(b.rr))) ## Identity matrix
-L = kronecker(I, (fl)) ## Get factor loadings on diagonal
-rownames(L) = rep( cnms$Country, ncol(b.rr) )
-H.l.u = L %*% h.b.rr.inv %*% t(L)
-sd.lu = sqrt(diag( H.l.u ))
+## Create L matrix, where L is (nc x nb) x (nb x d)
+I <- diag( rep(1,  nb[[block.rr]] ) ) ## Identity matrix
+L <- kronecker(I, (fl)) ## factor loadings on diagonal
+rownames(L) <- rep( rownames(fl), nb[[block.rr]] )
+H.l.u <- L %*% h.inv.u.rr %*% t(L)
+sd.lu <- sqrt( diag(H.l.u) )
 ### There's probably a better way to do this
-sd.lu = data.frame( rownames(H.l.u), sd.lu)
-nam.grp = rep( levs$Country, each = nrow(fl) )
-sd.re = cbind( sd.lu, nam.grp )
-names(sd.re) = c("Coefficient", "sd.u", "Country")
+sd.lu <- data.frame( rownames(H.l.u), sd.lu)
+nam.grp <- rep( levs$Country, each = nrow(fl) )
+sd.re <- cbind( sd.lu, nam.grp )
+names(sd.re) <- c("Coefficient", "sd.lu", "Country")
 
 ## include std errors to estimates
-ranef.rr = left_join(b.rr.long, sd.re, by = intersect(names(b.rr.long), names(sd.re)))
-ranef.rr$u = ranef.rr$lu
+ranef.rr <- left_join(b.rr.long, sd.re, by = intersect(names(b.rr.long), names(sd.re)))
 
 ### Create data frame for plot of rr
 pirls.plot.rr <- ranef.rr
 ## Fix labels, order and levels of Coefficient
 ### Change coefficient labels to be succinct
-coef_labels = c("(Intercept)", "More than 5,000 Books", "501-5,000 Books",  "No Library",
+coef_labels <- c("(Intercept)", "More than 5,000 Books", "501-5,000 Books",  "No Library",
                 "11 to 25%", "26 to 50%",  "More than 50%", "More than 5,000 Books: 11 to 25%",
                 "501-5,000 Books: 11 to 25%", "No Library: 11 to 25%", "More than 5,000 Books: 26 to 50%",
                 "501-5,000 Books: 26 to 50%", "No Library: 26 to 50%", "More than 5,000 Books: More than 50%",
                 "501-5,000 Books: More than 50%", "No Library: More than 50%")
-coef_order = c("(Intercept)", "No Library",  "501-5,000 Books", "More than 5,000 Books",
+coef_order <- c("(Intercept)", "No Library",  "501-5,000 Books", "More than 5,000 Books",
                "11 to 25%", "26 to 50%",  "More than 50%", "No Library: 11 to 25%", "No Library: 26 to 50%", "No Library: More than 50%",
                "501-5,000 Books: 11 to 25%", "501-5,000 Books: 26 to 50%", "501-5,000 Books: More than 50%",
                "More than 5,000 Books: 11 to 25%", "More than 5,000 Books: 26 to 50%", "More than 5,000 Books: More than 50%")
-coef_plot_labels = c("(Intercept)", "No Library",  "501-5,000 Books", "More than 5,000 Books", "11 to 25%", "26 to 50%",  "More than 50%",
+coef_plot_labels <- c("(Intercept)", "No Library",  "501-5,000 Books", "More than 5,000 Books", "11 to 25%", "26 to 50%",  "More than 50%",
                      "No Library: \n 11 to 25%", "No Library: \n 26 to 50%", "No Library: \n More than 50%",
                      "501-5,000 Books: \n 11 to 25%", "501-5,000 Books: \n 26 to 50%", "501-5,000 Books: \n More than 50%",
                      "More than 5,000 Books: \n 11 to 25%", "More than 5,000 Books: \n 26 to 50%", "More than 5,000 Books: \n More than 50%")
@@ -122,8 +124,8 @@ coef_plot_labels = c("(Intercept)", "No Library",  "501-5,000 Books", "More than
 ### Highlight two countries
 country1 <- "Bulgaria"
 country2 <- "Georgia"
-pirls.plot.rr$Coefficient_plot = plysr::mapvalues(pirls.plot.rr$Coefficient, from = unique(pirls.plot.rr$Coefficient), to = coef_labels)
-pirls.plot.rr = pirls.plot.rr %>%
+pirls.plot.rr$Coefficient_plot <- plyr::mapvalues(pirls.plot.rr$Coefficient, from = unique(pirls.plot.rr$Coefficient), to = coef_labels)
+pirls.plot.rr <- pirls.plot.rr %>%
   mutate(Coefficient_plot = factor(Coefficient_plot, levels = coef_order, ordered = T),
          Country = factor(Country, levels = sort(unique(ranef.rr$Country)), ordered = T),
          highlight_c = case_when(Country == country1 ~ "colour 1",
@@ -132,12 +134,12 @@ pirls.plot.rr = pirls.plot.rr %>%
          highlight_c = factor(highlight_c, ordered = T))
 pirls.plot.rr$Coefficient_plot_labels = plyr::mapvalues(pirls.plot.rr$Coefficient_plot, from = coef_order, to = coef_plot_labels)
 
-ggplot(pirls.plot.rr,
+plot.rr <- ggplot(pirls.plot.rr,
        aes(x = reorder(Country, desc(Country))  ,
-           y = u,
+           y = lu,
            colour = (highlight_c))) +
-  geom_point()+
-  geom_linerange(aes(ymin = u - 1.96*sd.u, ymax = u + 1.96*sd.u)) +
+  geom_point() +
+  geom_linerange(aes(ymin = lu - 1.96*sd.lu, ymax = lu + 1.96*sd.lu)) +
   geom_hline(yintercept = 0, linetype  = "dashed") +
   facet_grid(~ factor(Coefficient_plot_labels, ordered = T), scales = "free") +
   coord_flip() + theme_mine() +
@@ -150,7 +152,12 @@ ggplot(pirls.plot.rr,
          legend.position="none",
          strip.text.x = element_text(size=10, angle=90, hjust = 0, vjust =0.5))+
   scale_color_manual(values  = c("#000000", "#0033FF", "#0A7527" ))
+  # scale_y_continuous(n.breaks = 4)
+plot.rr
 
+plot_name <- "pirls_rr_estimates"
+ggsave(filename = paste0("Plots/", plot_name,".png"), device = "png",
+       plot  = plot.rr, height=8, width = 15 )
 #### ---------------------------------------------------
 #### Prediction plot of interaction
 #### ----------------------------------------------------
@@ -164,25 +171,24 @@ pirls_pred <- pirls %>%
 pred1 <- predict(fit.rr, newdata = pirls_pred, allow.new.levels = T)
 pirls_pred$pred_y <- pred1
 
-beta = fixef(object)$cond
+beta <- fixef(object)$cond
 ## Include se of beta and rr ('ignoring' school random effect)
 # Var[X beta] = X Var[beta] X'
-s1.beta = s1$jointPrecision[rownames(s1$jointPrecision)=="beta", colnames(s1$jointPrecision)=="beta"]
-h.beta.inv = solve(s1.beta)
+s1.beta <- s1$jointPrecision[rownames(s1$jointPrecision)=="beta", colnames(s1$jointPrecision)=="beta"]
+h.beta.inv <- solve(s1.beta)
 ### Now get X in the same order as fixed effects order
 Sl_lev <- factor( na.omit( unique(pirls$Size_lib) ) )
 Eco_lev <- factor( na.omit( unique(pirls$Eco_disad) ) )
-x.data <- expand.grid(Size_lib = Sl_lev ,
-                      Eco_disad = Eco_lev ) %>%
+x.data <- expand.grid(Size_lib = Sl_lev, Eco_disad = Eco_lev ) %>%
   mutate(Eco_disad = relevel(Eco_disad, ref = "0 to 10%"),
          Size_lib = relevel(Size_lib, ref = "500 Book Titles or Fewer"))
 X.mat <- model.matrix( ~ 1 + Size_lib*Eco_disad, data = x.data)
 if(!all(colnames(X.mat) == names(beta))) print("Warning! Check X model matrix")
 
 ### Get standard errors
-covar.beta = X.mat %*% h.beta.inv %*% t(X.mat)
-sd_beta = sqrt(diag(covar.beta))
-names(sd_beta) = names(beta)
+covar.beta <- X.mat %*% h.beta.inv %*% t(X.mat)
+sd_beta <- sqrt(diag(covar.beta))
+names(sd_beta) <- names(beta)
 
 fixed.effects = data.frame(beta = beta, sd_beta = sd_beta) %>%
   rownames_to_column() %>%
@@ -201,10 +207,9 @@ eco_disad_beta <- c(rep(Ed_lev[1], 4), Ed_lev[2:4], rep(Ed_lev[2:4], each = 3)) 
 size_lib_beta <- c( sl_lev, rep(sl_lev[1], each = 3 ), rep( sl_lev[2:4], times = 3) ) #Sl_lev
 ##Check if they match
 beta_check <- data.frame(cbind(beta_names, eco_disad_beta, size_lib_beta))
-# beta_check <- data.frame(cbind(beta_names, eco_disad_beta, size_lib_beta, levels(pirls_pred$Eco_disad), levels(pirls_pred$Size_lib)))
+
 sd.error.pred$Eco_disad <- plyr::mapvalues(sd.error.pred$Coefficient, from = beta_names, to = eco_disad_beta)
 sd.error.pred$Size_lib <- plyr::mapvalues(sd.error.pred$Coefficient, from = beta_names, to = size_lib_beta)
-
 pirls_pred_data <- left_join(pirls_pred, sd.error.pred, by = c("Eco_disad", "Size_lib", "Country")) %>%
   arrange(Country, Eco_disad, Size_lib)
 ## ----------------------------------
@@ -245,11 +250,10 @@ plot.int <- ggplot(filter(pirls_pred_data,  !is.na(pred_y)),
   scale_colour_manual(values = values)+
   scale_fill_manual(values=values, name="fill") +
   scale_linetype_manual(values=c("dotted", "dotdash",  "dashed", "solid"), name = "Library Size") + # Change linetypes
-  theme(axis.text.x = element_text(size= 12, angle=0, hjust = 0.4, vjust =0),
-        axis.text.y = element_text(size= 12),
-        axis.text = element_text( size = 12),
-        axis.title.x = element_text(size = 12, margin = unit(c(5, 0, 0, 0), "mm")),
-        axis.title.y = element_text(size = 12, margin = unit(c(0, 5,0 , 0), "mm")),
+  theme(axis.text.x = element_text(size= 14, angle=0, hjust = 0.4, vjust =0),
+        axis.text = element_text( size = 14),
+        axis.title.x = element_text(size = 16, margin = unit(c(5, 0, 0, 0), "mm")),
+        axis.title.y = element_text(size = 16, margin = unit(c(0, 5,0 , 0), "mm")),
         plot.margin=unit(c(1,5,1.5,1.2),"cm"), legend.position= "none")  +
   # scale_y_continuous(limits=c(350,680), breaks=seq(350,680,40))+
   guides(colour="none") +
@@ -261,7 +265,8 @@ plot.int <- ggplot(filter(pirls_pred_data,  !is.na(pred_y)),
                    xlim = c(4,5.2), na.rm = TRUE)
 
 plot_name <- "pirls_interaction_with_sd2"
-ggsave(filename = paste0("Plots/", plot_name,".png"), device = "png", plot  = plot.int, height=8, width = 14 )
+ggsave(filename = paste0("Plots/", plot_name,".png"), device = "png", plot  = plot.int,
+       width = 320, height = 180, units = "mm" )
 
 level_sum <- pirls %>%
   group_by(Country, Eco_disad, Size_lib) %>%

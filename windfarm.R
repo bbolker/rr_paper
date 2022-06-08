@@ -1,10 +1,9 @@
 library(dplyr)
-library(lme4)
 library(glmmTMB)
 library(ggplot2)
 library(gridExtra)
 source("functions.R")
-set.seed(101)
+set.seed(1001)
 # ----------------------------------------------------------------
 # Read in Data
 # ----------------------------------------------------------------
@@ -17,21 +16,23 @@ wf_boxplot <- ggplot(windfarm, aes(x = Year, y = log(abundance + 1), fill = Zone
   facet_wrap(~ Species, ncol = 3, scales = "free") +
   labs(x = "Year", color  = "Zone", y = "Abundance [log(y+1)-scale]") +
   scale_y_continuous( breaks = log(labs + 1), labels = labs)+
-  facet_wrap(~ Species, ncol = 3, scales="free") +
   theme_mine() +
-  theme(legend.justification = c("top"),
-        # legend.position = c(.95, .95),
-        legend.box.just = "right",
-        legend.margin = margin(4, 4, 4, 4)) +
+  theme(legend.position="none",
+        axis.text.x = element_text(size=14),
+        axis.text.y = element_text(size=14),
+        axis.title.x = element_text(size=18 , vjust = -2),
+        axis.title.y = element_text(size=18 , vjust = 1 ),
+        strip.text.x = element_text(size=16, angle=0, hjust = 0)
+        ) +
   scale_fill_brewer(palette = "Set2")
-
+wf_boxplot
 plot.name <- "wf_boxplot"
-ggsave(filename = paste0("Plots/", plot.name, ".png"), device = "png",
-       plot  = wf_boxplot, height=8, width = 16 )
-
-# ----------------------------------------------------------------
+ggsave(filename = paste0("Plots/", plot.name, ".png"), width = 350, height = 210,
+       units = "mm", device = "png")
+#### ----------------------------------------------------------------
 #### Fit models
-# # ----------------------------------------------------------------
+#### ----------------------------------------------------------------
+# predictor of interest is Zone:Year
 wf.glmm.null <- glmmTMB(abundance ~  Zone + Year + diag(Zone + Year|Species) + (1|Station) +
                           rr(Species + 0 | ID, d = 2),
                         family = "poisson", data = windfarm,
@@ -52,10 +53,10 @@ AIC(wf.glmm); AIC(wf.glmm.comp.sym)
 wf.glmm.unc <- glmmTMB(abundance ~  Species + rr(Species + 0 | ID, d = 2),
                        family = "poisson", data = windfarm, control = glmmTMBControl(start_method = list(method = "res")  ))
 
-LRobs <- 2*logLik(wf.glmm) - 2*logLik(wf.glmm.null) #observed test stat
 ### --------------------------------------
 # Parametric bootstrap test
 ### --------------------------------------
+LRobs <- 2*logLik(wf.glmm) - 2*logLik(wf.glmm.null) #observed test stat
 nSims <- 1000
 LR <- rep(NA,nSims)
 for(i in 1:nSims){
@@ -107,7 +108,6 @@ sd.b <- data.frame(sd.b = sqrt( diag( s1.b.inv) ))
 coef.nam <- rep(cnms[[block.plot]], nb[[block.plot]])
 nam.grp <- rep(levs[[block.plot]], each = nc[[block.plot]])
 sd.diag.re <- cbind(coef.nam, nam.grp, sd.b)
-
 names(sd.diag.re) <- c("Coefficient", names(levs[block.plot]), "sd.b")
 
 diag.plot.data <- left_join(diag.plot.long, sd.diag.re, by = intersect(names(diag.plot.long), names(sd.diag.re)))
@@ -132,17 +132,17 @@ plot.wf.diag <- diag.plot.data %>%
   xlab("Coefficient") + ylab("Estimate") +
   theme_mine() +
   theme(legend.position="none",
-        axis.text.x = element_text(size=12),
-        axis.text.y = element_text(size=12),
-        axis.title.x = element_text(size=14 , vjust = -2),
-        axis.title.y = element_text(size=14 , vjust = 1 ),
-        strip.text.x = element_text(size=14, angle=0, hjust = 0)) +
+        axis.text.x = element_text(size=14),
+        axis.text.y = element_text(size=14),
+        axis.title.x = element_text(size=18 , vjust = -2),
+        axis.title.y = element_text(size=18 , vjust = 1 ),
+        strip.text.x = element_text(size=16, angle=0, hjust = 0)) +
   scale_color_manual(values = c("black", "red"))
 plot.wf.diag
 
 plot.name <- "wf_diag_int"
-ggsave(filename = paste0("Plots/", plot.name, ".png"), device = "png",
-       plot  = plot.wf.diag, height=8, width = 16 )
+ggsave(plot = plot.wf.diag, filename = paste0("Plots/", plot.name, ".png"), width = 390, height = 190, units = "mm", device = "png")
+
 ### --------------------------------------
 ### Ordination plots
 ### --------------------------------------
@@ -173,8 +173,8 @@ unc.plot <- ggplot(wf.unc.b2) +
   theme_mine() +
   theme(legend.position = "none",
         plot.title = element_text(size = 16),
-        axis.title.x = element_text(size=14),
-        axis.title.y = element_text(size=14)) +
+        axis.title.x = element_text(size=12),
+        axis.title.y = element_text(size=12)) +
   labs(title="(a) Unconstrained ordination", x = "Latent variable 1", y = "Latent variable 2") +
   scale_color_brewer(palette = "Dark2") +
   coord_cartesian(xlim = c(-11, 10), ylim = c(-8, 8)) +
@@ -201,8 +201,8 @@ residual.plot <- ggplot(wf.b2) +
         legend.box.just = "right",
         legend.margin = margin(4, 4, 4, 4),
         plot.title = element_text(size = 16),
-        axis.title.x = element_text(size=14),
-        axis.title.y = element_text(size=14)) +
+        axis.title.x = element_text(size=12),
+        axis.title.y = element_text(size=12)) +
   labs(title="(b) Residual ordination", x = "Latent variable 1", y = "Latent variable 2") +
   scale_color_brewer(palette = "Dark2")+
   coord_cartesian(xlim = c(-11, 10), ylim = c(-8, 8)) +
@@ -211,8 +211,9 @@ residual.plot <- ggplot(wf.b2) +
 ordiplots <- grid.arrange(unc.plot, residual.plot, ncol=2)
 
 plot.name <- "wf_ordiplot_2"
-ggsave(filename = paste0("Plots/", plot.name, ".png"), device = "png",
-       plot  = ordiplots, height=8, width = 16)
+ggsave(plot = ordiplots, filename = paste0("Plots/", plot.name, ".png"),
+       width = 300, height = 150, units = "mm", device = "png")
+
 
 # Variance explained
 unc.wf.ll <- (as.matrix(unc.wf.fl) %*% as.matrix(t(unc.wf.fl)))

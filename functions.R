@@ -54,8 +54,6 @@ load.file.type <- function(file.type = "acg.*"){
   data <- lapply(files, function(x) read.spss(x, use.value.label = TRUE, to.data.frame = TRUE))
 }
 
-
-
 theme_mine <- function(base_size = 12) {
   theme_bw(base_size = base_size) %+replace%
     theme(
@@ -73,7 +71,6 @@ theme_mine <- function(base_size = 12) {
       panel.grid.minor = element_blank(),
       panel.spacing = unit(1.0, "lines"),
       plot.background = element_blank(),
-      # plot.spacing = unit(c(0.5,  0.5, 0.5, 0.5), "lines"),
       axis.line.x = element_line(color="black", size = 1),
       axis.line.y = element_line(color="black", size = 1)
     )
